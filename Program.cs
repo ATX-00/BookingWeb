@@ -14,7 +14,7 @@ app.MapGet("/", async context =>
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>DSCI-Lab 線上預約 (7天 × 自訂時段)</title>
+<title>DSCI-Lab 量測預約系統 </title>
 <style>
   body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Noto Sans TC, sans-serif; padding:24px; max-width:760px; margin:auto; }
   h1 { font-size: 26px; margin-bottom: 12px; }
@@ -33,7 +33,7 @@ app.MapGet("/", async context =>
 </style>
 </head>
 <body>
-  <h1>DSCI-Lab 線上預約</h1>
+  <h1>DSCI-Lab 量測預約系統</h1>
   <div class="muted">時段：08~12、13~17、18~22、22以後。已預約的時段會在選單標註「已預約：姓名」。可用姓名＋星期＋時段取消。</div>
 
   <form id="booking-form">
@@ -66,7 +66,9 @@ const slotEl = document.getElementById('slot');
 const msgEl = document.getElementById('msg');
 const takenDayEl = document.getElementById('takenDay');
 const weeklyEl = document.getElementById('weekly');
-
+dayEl.addEventListener('change', async () => {
+  await loadSlots();   // 切換星期時，自動更新對應的時段與已預約者
+});
 function flash(type, text){ msgEl.innerHTML = `<div class="${type}">${text}</div>`; }
 
 async function loadDays() {
