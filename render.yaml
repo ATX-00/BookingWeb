@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: bookingweb
+    env: docker
+    plan: free
+    autoDeploy: true
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1

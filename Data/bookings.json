@@ -1,0 +1,42 @@
+[
+  {
+    "Id": "eb943437a9864714ac1ee13bd9325797",
+    "Day": "\u661F\u671F\u4E94",
+    "Slot": "14:00",
+    "Name": "\u4FAF\u7AE3\u5347",
+    "Email": "jason44477862@gmail.com",
+    "CreatedAt": "2025-08-27T07:34:19.7847628+00:00"
+  },
+  {
+    "Id": "2df7f90d677d45eeb707cae92aee3790",
+    "Day": "\u661F\u671F\u56DB",
+    "Slot": "09:00",
+    "Name": "\u4FAF\u7AE3\u5347",
+    "Email": "jason44477862@gmail.com",
+    "CreatedAt": "2025-08-27T07:35:10.7572445+00:00"
+  },
+  {
+    "Id": "790acefc00ba4f1f8596b3279109ffb6",
+    "Day": "\u661F\u671F\u56DB",
+    "Slot": "16:00",
+    "Name": "\u4FAF\u7AE3\u5347",
+    "Email": "jason44477862@gmail.com",
+    "CreatedAt": "2025-08-27T07:35:15.0027729+00:00"
+  },
+  {
+    "Id": "7ebe854a88ef40129d78b28a4b4861fc",
+    "Day": "\u661F\u671F\u56DB",
+    "Slot": "14:00",
+    "Name": "\u4FAF\u7AE3\u5347",
+    "Email": "jason44477862@gmail.com",
+    "CreatedAt": "2025-08-27T07:35:20.5599799+00:00"
+  },
+  {
+    "Id": "b058e493d0cd493b8192fae5249ecb38",
+    "Day": "\u661F\u671F\u4E00",
+    "Slot": "09:00",
+    "Name": "Winston Chen",
+    "Email": "winstonhqc@gmail.com",
+    "CreatedAt": "2025-08-27T08:18:42.024686+00:00"
+  }
+]
