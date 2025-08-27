@@ -8,13 +8,13 @@ var app = builder.Build();
 // ─────────────────────────────── 前端頁面 ───────────────────────────────
 app.MapGet("/", async context =>
 {
-    var html = """
+var html = """
 <!doctype html>
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>DSCI-Lab 線上預約 (7天 × 自訂時段)加油加油</title>
+<title>DSCI-Lab 線上預約 (7天 × 自訂時段)</title>
 <style>
   body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Noto Sans TC, sans-serif; padding:24px; max-width:760px; margin:auto; }
   h1 { font-size: 26px; margin-bottom: 12px; }
@@ -23,7 +23,7 @@ app.MapGet("/", async context =>
   select, input[type=text] { width:100%; padding:10px; border-radius:10px; border:1px solid #ccc; }
   button { padding:10px 16px; border:0; border-radius:10px; cursor:pointer; }
   .primary { background:#111; color:#fff; }
-  .danger { background:#b00020; color:#fff; }
+  .danger  { background:#b00020; color:#fff; }
   .muted { color:#666; }
   .list { display:grid; gap:8px; }
   .success { background:#eaf7ea; border:1px solid #bbe6bb; padding:8px 12px; border-radius:8px; }
@@ -33,8 +33,8 @@ app.MapGet("/", async context =>
 </style>
 </head>
 <body>
-  <h1>DSCI-Lab 線上預約</h1>
-  <div class="muted">時段：08~12、13~17、18~22、22以後。若時段已被預約，會顯示預約者姓名。可用姓名＋星期＋時段取消自己的預約。</div>
+  <h1>DSCI-Lab 量測線上預約</h1>
+  <div class="muted">時段：08~12、13~17、18~22、22以後。若時段已被預約會在選單中標註「已預約：姓名」。可用姓名＋星期＋時段取消自己的預約。</div>
 
   <form id="booking-form">
     <label for="day">選擇日期（星期）</label>
@@ -49,7 +49,7 @@ app.MapGet("/", async context =>
 
     <div class="row" style="margin-top:12px;">
       <button class="primary" type="submit">送出預約</button>
-      <button type="button" id="refresh">重新載入可約時段</button>
+      <button type="button" id="refresh">重新載入</button>
       <button type="button" id="cancel" class="danger">取消我的預約</button>
     </div>
     <div id="msg" style="margin-top:12px;"></div>
@@ -67,9 +67,7 @@ const msgEl = document.getElementById('msg');
 const takenDayEl = document.getElementById('takenDay');
 const weeklyEl = document.getElementById('weekly');
 
-function flash(type, text){
-  msgEl.innerHTML = `<div class="${type}">${text}</div>`;
-}
+function flash(type, text){ msgEl.innerHTML = `<div class="${type}">${text}</div>`; }
 
 async function loadDays() {
   const res = await fetch('/api/days');
@@ -81,279 +79,11 @@ async function loadSlots() {
   const day = dayEl.value;
   const res = await fetch('/api/slots?day=' + encodeURIComponent(day));
   const data = await res.json();
-  slotEl.innerHTML = data.available.length
-    ? data.available.map(s => `<option value="${s}">${s}</option>`).join('')
-    : `<option value="">（該天無可預約時段）</option>`;
+  // data: { detail:[{slot,name|null}], takenDetail:[{slot,name}], available:[...]}
+  // ▼ 下拉選單「永遠列出所有時段」，已預約的加註（已預約：姓名）
+  slotEl.innerHTML = data.detail.map(x => {
+    const note = x.name ? `（已預約：${x.name}）` : '';
+    return `<option value="${x.slot}">${x.slot}${note}</option>`;
+  }).join('');
 
   takenDayEl.innerHTML = data.takenDetail.length
-    ? '該天已被預約：' + data.takenDetail.map(x => `<span class="pill">${x.slot}（${x.name}）</span>`).join(' ')
-    : '該天尚無已被預約的時段';
-}
-
-async function loadWeekly() {
-  const res = await fetch('/api/weekly');
-  const items = await res.json(); // [{ day, slots: [{slot,name|null}] }]
-  weeklyEl.innerHTML = items.map(d => {
-    const cells = d.slots.map(s => s.name
-      ? `<span class="pill">${s.slot}（${s.name}）</span>`
-      : `<span class="pill">${s.slot}（空）</span>`).join(' ');
-    return `<div>${d.day}：${cells}</div>`;
-  }).join('');
-}
-
-document.getElementById('refresh').addEventListener('click', async () => {
-  await loadSlots();
-});
-
-document.getElementById('booking-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  msgEl.innerHTML = '';
-  const body = {
-    day: dayEl.value,
-    slot: slotEl.value,
-    name: document.getElementById('name').value.trim()
-  };
-  if(!body.name){ flash('error','請先輸入姓名'); return; }
-  const res = await fetch('/api/book', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-  const data = await res.json();
-  if (res.ok) {
-    flash('success', `✅ 預約成功：${data.name} — ${data.day} ${data.slot}`);
-    await loadSlots(); await loadWeekly();
-  } else {
-    flash('error', `❌ ${data.error || '發生錯誤'}`);
-    await loadSlots(); await loadWeekly();
-  }
-});
-
-document.getElementById('cancel').addEventListener('click', async () => {
-  const body = {
-    day: dayEl.value,
-    slot: slotEl.value,
-    name: document.getElementById('name').value.trim()
-  };
-  if(!body.name){ flash('error','請先輸入姓名'); return; }
-  const res = await fetch('/api/cancel', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-  const data = await res.json();
-  if (res.ok) {
-    flash('success', `🗑️ 已取消：${data.name} — ${data.day} ${data.slot}`);
-    await loadSlots(); await loadWeekly();
-  } else {
-    flash('error', `❌ ${data.error || '取消失敗'}`);
-  }
-});
-
-(async () => {
-  await loadDays();
-  await loadSlots();
-  await loadWeekly();
-})();
-</script>
-</body>
-</html>
-""";
-    context.Response.ContentType = "text/html; charset=utf-8";
-    await context.Response.WriteAsync(html);
-});
-
-// ─────────────────────────────── 常數與 API ───────────────────────────────
-string[] DAYS = new[] { "星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日" };
-string[] SLOTS = new[] { "08~12", "13~17", "18~22", "22以後" };
-
-// 7 天（星期一～星期日）
-app.MapGet("/api/days", () => DAYS);
-
-// 該天可預約與已被預約（含姓名），進入時順便進行「可能」清理
-app.MapGet("/api/slots", (string day, BookingStore store) =>
-{
-    store.MaybePurge(TimeSpan.FromDays(7));
-    var takenBookings = store.QueryByDay(day).ToList();
-    var taken = takenBookings.Select(b => b.Slot).Distinct()
-                 .OrderBy(s => Array.IndexOf(store.SLOTS, s)).ToList();
-    var available = store.SLOTS.Where(s => !taken.Contains(s)).ToList();
-    var takenDetail = takenBookings
-        .GroupBy(b => b.Slot)
-        .Select(g => new { slot = g.Key, name = g.OrderBy(x => x.CreatedAt).Last().Name })
-        .OrderBy(x => Array.IndexOf(store.SLOTS, x.slot))
-        .ToList();
-
-    return Results.Ok(new { available, taken, takenDetail });
-});
-
-// 建立預約（同一天同時段防重複）
-app.MapPost("/api/book", (BookingDto dto, BookingStore store) =>
-{
-    store.MaybePurge(TimeSpan.FromDays(7));
-
-    if (string.IsNullOrWhiteSpace(dto.Name))
-        return Results.BadRequest(new { error = "姓名必填" });
-    if (string.IsNullOrWhiteSpace(dto.Day) || string.IsNullOrWhiteSpace(dto.Slot))
-        return Results.BadRequest(new { error = "請選擇星期與時段" });
-
-    if (!store.SLOTS.Contains(dto.Slot))
-        return Results.BadRequest(new { error = "時段不在可預約清單中" });
-
-    if (!store.DAYS.Contains(dto.Day))
-        return Results.BadRequest(new { error = "星期不在可預約清單中" });
-
-    if (store.Exists(dto.Day, dto.Slot))
-        return Results.BadRequest(new { error = $"該時段已有人，請換一個：{dto.Day} {dto.Slot}" });
-
-    var booking = new Booking
-    {
-        Id = Guid.NewGuid().ToString("N"),
-        Day = dto.Day,
-        Slot = dto.Slot,
-        Name = dto.Name.Trim(),
-        CreatedAt = DateTimeOffset.UtcNow
-    };
-    store.Add(booking);
-    return Results.Ok(booking);
-});
-
-// 取消自己的預約（需姓名 + 星期 + 時段完全符合；姓名不分大小寫、去前後空白）
-app.MapPost("/api/cancel", (BookingDto dto, BookingStore store) =>
-{
-    store.MaybePurge(TimeSpan.FromDays(7));
-
-    if (string.IsNullOrWhiteSpace(dto.Name))
-        return Results.BadRequest(new { error = "姓名必填" });
-    if (string.IsNullOrWhiteSpace(dto.Day) || string.IsNullOrWhiteSpace(dto.Slot))
-        return Results.BadRequest(new { error = "請選擇星期與時段" });
-
-    var ok = store.Remove(dto.Day, dto.Slot, dto.Name);
-    if (!ok) return Results.BadRequest(new { error = "找不到對應的預約，或姓名不符" });
-
-    return Results.Ok(new { day = dto.Day, slot = dto.Slot, name = dto.Name.Trim() });
-});
-
-// 全週總覽：每天列四個時段，並標示（姓名）或（空）
-app.MapGet("/api/weekly", (BookingStore store) =>
-{
-    store.MaybePurge(TimeSpan.FromDays(7));
-    return store.DAYS.Select(d => new {
-        day = d,
-        slots = store.SLOTS.Select(s =>
-        {
-            var name = store.QueryByDay(d).FirstOrDefault(b => b.Slot == s)?.Name;
-            return new { slot = s, name = name };
-        }).ToList()
-    }).ToList();
-});
-
-app.Run();
-
-// ─────────────────────────────── 型別與儲存 ───────────────────────────────
-record Booking
-{
-    public string Id { get; set; } = default!;
-    public string Day { get; set; } = default!;
-    public string Slot { get; set; } = default!;
-    public string Name { get; set; } = default!;
-    public DateTimeOffset CreatedAt { get; set; }
-}
-
-record BookingDto(
-    [property: JsonPropertyName("day")] string Day,
-    [property: JsonPropertyName("slot")] string Slot,
-    [property: JsonPropertyName("name")] string Name);
-
-class BookingStore
-{
-    private readonly string _path;
-    private readonly object _lock = new();
-    private List<Booking> _cache = new();
-    private DateTimeOffset _lastPurge = DateTimeOffset.MinValue;
-
-    public string[] DAYS { get; }
-    public string[] SLOTS { get; }
-
-    public BookingStore(IHostEnvironment env)
-    {
-        DAYS = new[] { "星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日" };
-        SLOTS = new[] { "08~12", "13~17", "18~22", "22以後" };
-
-        var dataDir = Environment.GetEnvironmentVariable("DATA_DIR")
-                      ?? Path.Combine(env.ContentRootPath, "Data");
-        Directory.CreateDirectory(dataDir);
-        _path = Path.Combine(dataDir, "bookings.json");
-
-        if (File.Exists(_path))
-        {
-            try
-            {
-                var json = File.ReadAllText(_path);
-                var data = JsonSerializer.Deserialize<List<Booking>>(json);
-                if (data != null) _cache = data;
-            }
-            catch { _cache = new List<Booking>(); }
-        }
-
-        // 啟動即清 7 天前資料
-        PurgeOlderThan(TimeSpan.FromDays(7));
-    }
-
-    public IEnumerable<Booking> QueryByDay(string day)
-    {
-        lock (_lock) return _cache.Where(b => b.Day == day).ToList();
-    }
-
-    public bool Exists(string day, string slot)
-    {
-        lock (_lock) return _cache.Any(b => b.Day == day && b.Slot == slot);
-    }
-
-    public void Add(Booking b)
-    {
-        lock (_lock)
-        {
-            _cache.Add(b);
-            Save();
-        }
-    }
-
-    // 取消（姓名大小寫不敏感、去前後空白）
-    public bool Remove(string day, string slot, string name)
-    {
-        name = name.Trim();
-        lock (_lock)
-        {
-            var idx = _cache.FindIndex(b =>
-                b.Day == day &&
-                b.Slot == slot &&
-                string.Equals(b.Name.Trim(), name, StringComparison.OrdinalIgnoreCase));
-            if (idx >= 0)
-            {
-                _cache.RemoveAt(idx);
-                Save();
-                return true;
-            }
-            return false;
-        }
-    }
-
-    // 可能清理（每小時最多執行一次）
-    public void MaybePurge(TimeSpan olderThan)
-    {
-        if (DateTimeOffset.UtcNow - _lastPurge < TimeSpan.FromHours(1)) return;
-        PurgeOlderThan(olderThan);
-    }
-
-    // 立刻清理超過期限的紀錄
-    public void PurgeOlderThan(TimeSpan olderThan)
-    {
-        lock (_lock)
-        {
-            var cutoff = DateTimeOffset.UtcNow - olderThan;
-            int before = _cache.Count;
-            _cache = _cache.Where(b => b.CreatedAt >= cutoff).ToList();
-            if (_cache.Count != before) Save();
-            _lastPurge = DateTimeOffset.UtcNow;
-        }
-    }
-
-    private void Save()
-    {
-        var json = JsonSerializer.Serialize(_cache, new JsonSerializerOptions { WriteIndented = true });
-        File.WriteAllText(_path, json);
-    }
-}
