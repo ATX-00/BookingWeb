@@ -1,15 +1,21 @@
-﻿// Program.cs - DSCI-Lab 量測預約系統（週一→週日，只保留本週）
+﻿// Program.cs - DSCI-Lab 預約系統（Postgres 版；換週才清理、週一→週日）
 
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Npgsql;
+using NpgsqlTypes;
 
 // ── Top-level statements ──
+// （Render 常見做法）用環境變數 PORT 監聽正確埠
+var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 var builder = WebApplication.CreateBuilder(args);
+builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
+
 builder.Services.AddSingleton<BookingStore>();
 var app = builder.Build();
 
 
-// ─────────────── 首頁 HTML ───────────────
+// ────────────────────── 首頁 HTML ──────────────────────
 app.MapGet("/", async context =>
 {
     var html = """
@@ -78,7 +84,7 @@ const takenDayEl = document.getElementById('takenDay');
 const weeklyEl = document.getElementById('weekly');
 
 function flash(type, text){ msgEl.innerHTML = `<div class="${type}">${text}</div>`; }
-function pretty(d){ 
+function pretty(d){
   const w = ["日","一","二","三","四","五","六"];
   const dt = new Date(d + "T00:00:00");
   return `${(dt.getMonth()+1).toString().padStart(2,'0')}/${dt.getDate().toString().padStart(2,'0')}（${w[dt.getDay()]}）`;
@@ -146,18 +152,16 @@ document.getElementById('cancel').addEventListener('click', async () => {
     await context.Response.WriteAsync(html);
 });
 
-
-// ─────────────── API ───────────────
+// ────────────────────── API ──────────────────────
 string[] SLOTS = new[] { "08~12", "13~17", "18~22", "22以後" };
 
-app.MapGet("/api/days", () =>
-{
-    return WeekHelper.GetDisplayWeekDateKeys(DateTime.UtcNow);
-});
+// 本週日期（週一→週日）
+app.MapGet("/api/days", () => WeekHelper.GetDisplayWeekDateKeys(DateTime.UtcNow));
 
+// 該日時段與已預約
 app.MapGet("/api/slots", (string date, BookingStore store) =>
 {
-    store.MaybePurgeCurrentWeek();
+    store.MaybePurgeOnWeekRoll();
     var detail = store.SLOTS.Select(s =>
     {
         var name = store.QueryByDate(date).FirstOrDefault(b => b.Slot == s)?.Name;
@@ -166,13 +170,13 @@ app.MapGet("/api/slots", (string date, BookingStore store) =>
 
     var takenDetail = detail.Where(x => x.name != null).ToList();
     var available = detail.Where(x => x.name == null).Select(x => x.slot).ToList();
-
     return Results.Ok(new { detail, takenDetail, available });
 });
 
+// 建立預約
 app.MapPost("/api/book", (BookingDto dto, BookingStore store) =>
 {
-    store.MaybePurgeCurrentWeek();
+    store.MaybePurgeOnWeekRoll();
     if (string.IsNullOrWhiteSpace(dto.Name)) return Results.BadRequest(new { error = "姓名必填" });
     if (string.IsNullOrWhiteSpace(dto.Date) || string.IsNullOrWhiteSpace(dto.Slot)) return Results.BadRequest(new { error = "請選擇日期與時段" });
     if (!store.SLOTS.Contains(dto.Slot)) return Results.BadRequest(new { error = "時段不在可預約清單中" });
@@ -194,9 +198,10 @@ app.MapPost("/api/book", (BookingDto dto, BookingStore store) =>
     return Results.Ok(booking);
 });
 
+// 取消預約
 app.MapPost("/api/cancel", (BookingDto dto, BookingStore store) =>
 {
-    store.MaybePurgeCurrentWeek();
+    store.MaybePurgeOnWeekRoll();
     if (string.IsNullOrWhiteSpace(dto.Name)) return Results.BadRequest(new { error = "姓名必填" });
     if (string.IsNullOrWhiteSpace(dto.Date) || string.IsNullOrWhiteSpace(dto.Slot)) return Results.BadRequest(new { error = "請選擇日期與時段" });
 
@@ -205,9 +210,10 @@ app.MapPost("/api/cancel", (BookingDto dto, BookingStore store) =>
     return Results.Ok(new { date = dto.Date, slot = dto.Slot, name = dto.Name.Trim() });
 });
 
+// 本週總覽
 app.MapGet("/api/weekly", (BookingStore store) =>
 {
-    store.MaybePurgeCurrentWeek();
+    store.MaybePurgeOnWeekRoll();
     var dates = WeekHelper.GetDisplayWeekDateKeys(DateTime.UtcNow);
     return dates.Select(d => new
     {
@@ -223,7 +229,7 @@ app.MapGet("/api/weekly", (BookingStore store) =>
 app.Run();
 
 
-// ─────────────── 型別宣告 ───────────────
+// ────────────────────── 型別宣告（放在最後，避免 CS8803） ──────────────────────
 record Booking
 {
     public string Id { get; set; } = default!;
@@ -238,100 +244,124 @@ record BookingDto(
     [property: JsonPropertyName("slot")] string Slot,
     [property: JsonPropertyName("name")] string Name);
 
+// Postgres 版本的資料存取
 class BookingStore
 {
-    private readonly string _path;
-    private readonly object _lock = new();
-    private List<Booking> _cache = new();
-    private DateTimeOffset _lastPurge = DateTimeOffset.MinValue;
-
+    private readonly string _conn;
+    private string? _lastWeekKey;               // 用來判斷是否進入新週
     public string[] SLOTS { get; }
 
     public BookingStore(IHostEnvironment env)
     {
         SLOTS = new[] { "08~12", "13~17", "18~22", "22以後" };
+        _conn = Environment.GetEnvironmentVariable("DB_CONN")
+                 ?? throw new InvalidOperationException("環境變數 DB_CONN 未設定（Postgres 連線字串）");
 
-        var dataDir = Environment.GetEnvironmentVariable("DATA_DIR") ?? Path.Combine(env.ContentRootPath, "Data");
-        Directory.CreateDirectory(dataDir);
-        _path = Path.Combine(dataDir, "bookings.json");
-
-        if (File.Exists(_path))
-        {
-            try
-            {
-                var json = File.ReadAllText(_path);
-                var data = JsonSerializer.Deserialize<List<Booking>>(json);
-                if (data != null) _cache = data;
-            }
-            catch { _cache = new List<Booking>(); }
-        }
-
-        PurgeExceptCurrentWeek(); // 啟動時清一次（只保留本週）
+        using var conn = new NpgsqlConnection(_conn);
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+CREATE TABLE IF NOT EXISTS bookings (
+  id         TEXT PRIMARY KEY,
+  date       DATE        NOT NULL,
+  slot       TEXT        NOT NULL,
+  name       TEXT        NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_bookings_date_slot ON bookings(date, slot);
+";
+        cmd.ExecuteNonQuery();
     }
 
     public IEnumerable<Booking> QueryByDate(string date)
     {
-        lock (_lock) return _cache.Where(b => b.Date == date).ToList();
+        using var conn = new NpgsqlConnection(_conn);
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT id, date, slot, name, created_at FROM bookings WHERE date=@d ORDER BY slot;";
+        cmd.Parameters.Add(new NpgsqlParameter("d", NpgsqlDbType.Date) { Value = DateOnly.Parse(date) });
+        using var r = cmd.ExecuteReader();
+
+        var list = new List<Booking>();
+        while (r.Read())
+        {
+            list.Add(new Booking
+            {
+                Id = r.GetString(0),
+                Date = r.GetFieldValue<DateOnly>(1).ToString("yyyy-MM-dd"),
+                Slot = r.GetString(2),
+                Name = r.GetString(3),
+                CreatedAt = r.GetFieldValue<DateTime>(4)
+            });
+        }
+        return list;
     }
 
     public bool Exists(string date, string slot)
     {
-        lock (_lock) return _cache.Any(b => b.Date == date && b.Slot == slot);
+        using var conn = new NpgsqlConnection(_conn);
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT 1 FROM bookings WHERE date=@d AND slot=@s LIMIT 1;";
+        cmd.Parameters.Add(new NpgsqlParameter("d", NpgsqlDbType.Date) { Value = DateOnly.Parse(date) });
+        cmd.Parameters.AddWithValue("s", slot);
+        using var r = cmd.ExecuteReader();
+        return r.Read();
     }
 
     public void Add(Booking b)
     {
-        lock (_lock)
-        {
-            _cache.Add(b);
-            Save();
-        }
+        using var conn = new NpgsqlConnection(_conn);
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+INSERT INTO bookings(id, date, slot, name, created_at)
+VALUES(@id, @d, @s, @n, @ts);";
+        cmd.Parameters.AddWithValue("id", b.Id);
+        cmd.Parameters.Add(new NpgsqlParameter("d", NpgsqlDbType.Date) { Value = DateOnly.Parse(b.Date) });
+        cmd.Parameters.AddWithValue("s", b.Slot);
+        cmd.Parameters.AddWithValue("n", b.Name);
+        cmd.Parameters.Add(new NpgsqlParameter("ts", NpgsqlDbType.TimestampTz) { Value = b.CreatedAt });
+        cmd.ExecuteNonQuery();
     }
 
     public bool Remove(string date, string slot, string name)
     {
-        name = name.Trim();
-        lock (_lock)
-        {
-            var idx = _cache.FindIndex(b =>
-                b.Date == date &&
-                b.Slot == slot &&
-                string.Equals(b.Name.Trim(), name, StringComparison.OrdinalIgnoreCase));
-            if (idx >= 0)
-            {
-                _cache.RemoveAt(idx);
-                Save();
-                return true;
-            }
-            return false;
-        }
+        using var conn = new NpgsqlConnection(_conn);
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+DELETE FROM bookings
+ WHERE date=@d AND slot=@s AND lower(trim(name)) = lower(trim(@n))
+ RETURNING 1;";
+        cmd.Parameters.Add(new NpgsqlParameter("d", NpgsqlDbType.Date) { Value = DateOnly.Parse(date) });
+        cmd.Parameters.AddWithValue("s", slot);
+        cmd.Parameters.AddWithValue("n", name);
+        var res = cmd.ExecuteScalar();
+        return res != null;
     }
 
-    public void MaybePurgeCurrentWeek()
+    // 只在「進入新週」時清理一次（保留本週資料）
+    public void MaybePurgeOnWeekRoll()
     {
-        if (DateTimeOffset.UtcNow - _lastPurge < TimeSpan.FromHours(1)) return;
-        PurgeExceptCurrentWeek();
-    }
+        var (mondayLocal, _) = WeekHelper.GetCycleWindowLocal(DateTime.UtcNow);
+        var thisWeekKey = mondayLocal.ToString("yyyy-MM-dd");
+        if (_lastWeekKey == thisWeekKey) return;
 
-    public void PurgeExceptCurrentWeek()
-    {
-        lock (_lock)
-        {
-            var allowed = new HashSet<string>(WeekHelper.GetDisplayWeekDateKeys(DateTime.UtcNow));
-            int before = _cache.Count;
-            _cache = _cache.Where(b => allowed.Contains(b.Date)).ToList();
-            if (_cache.Count != before) Save();
-            _lastPurge = DateTimeOffset.UtcNow;
-        }
-    }
+        var nextMondayLocal = mondayLocal.AddDays(7);
+        using var conn = new NpgsqlConnection(_conn);
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM bookings WHERE date < @mon OR date >= @next;";
+        cmd.Parameters.Add(new NpgsqlParameter("mon", NpgsqlDbType.Date) { Value = DateOnly.FromDateTime(mondayLocal) });
+        cmd.Parameters.Add(new NpgsqlParameter("next", NpgsqlDbType.Date) { Value = DateOnly.FromDateTime(nextMondayLocal) });
+        cmd.ExecuteNonQuery();
 
-    private void Save()
-    {
-        var json = JsonSerializer.Serialize(_cache, new JsonSerializerOptions { WriteIndented = true });
-        File.WriteAllText(_path, json);
+        _lastWeekKey = thisWeekKey;
     }
 }
 
+// 週期/日期（台灣時區、週一→週日）
 static class WeekHelper
 {
     private static TimeZoneInfo? _tz;
@@ -347,11 +377,12 @@ static class WeekHelper
     {
         var now = TimeZoneInfo.ConvertTimeFromUtc(utcNow, TzTaipei);
         int diff = ((int)now.DayOfWeek - (int)DayOfWeek.Monday + 7) % 7;
-        var mondayStart = now.Date.AddDays(-diff);
-        var nextMonday = mondayStart.AddDays(7);
+        var mondayStart = now.Date.AddDays(-diff); // 本週一 00:00（台灣）
+        var nextMonday = mondayStart.AddDays(7);  // 下週一 00:00（台灣）
         return (mondayStart, nextMonday);
     }
 
+    // 本週 7 天（yyyy-MM-dd）
     public static string[] GetDisplayWeekDateKeys(DateTime utcNow)
     {
         var (startLocal, _) = GetCycleWindowLocal(utcNow);

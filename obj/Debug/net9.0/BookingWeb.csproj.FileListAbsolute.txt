@@ -26,3 +26,5 @@ C:\Users\jason\BookingWeb\obj\Debug\net9.0\BookingWeb.pdb
 C:\Users\jason\BookingWeb\obj\Debug\net9.0\BookingWeb.genruntimeconfig.cache
 C:\Users\jason\BookingWeb\obj\Debug\net9.0\ref\BookingWeb.dll
 C:\Users\jason\BookingWeb\bin\Debug\net9.0\Data\bookings.json
+C:\Users\jason\BookingWeb\obj\Debug\net9.0\BookingWeb.sourcelink.json
+C:\Users\jason\BookingWeb\obj\Debug\net9.0\staticwebassets.upToDateCheck.txt
