@@ -224,7 +224,14 @@ app.MapGet("/api/weekly", (BookingStore store) =>
             return new { slot = s, name = name };
         }).ToList()
     }).ToList();
+
+    app.MapGet("/api/health", (BookingStore store) =>
+    {
+        store.Ping();
+        return Results.Ok(new { ok = true });
+    });
 });
+
 
 app.Run();
 
@@ -250,6 +257,12 @@ class BookingStore
     private readonly string _conn;
     private string? _lastWeekKey;               // 用來判斷是否進入新週
     public string[] SLOTS { get; }
+
+    public void Ping()
+    {
+        using var c = new NpgsqlConnection(_conn);
+        c.Open();
+    }
 
     public BookingStore(IHostEnvironment env)
     {
@@ -287,10 +300,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_bookings_date_slot ON bookings(date, slot);
         {
             list.Add(new Booking
             {
-                Id = r.GetString(0),
-                Date = r.GetFieldValue<DateOnly>(1).ToString("yyyy-MM-dd"),
-                Slot = r.GetString(2),
-                Name = r.GetString(3),
+                Id        = r.GetString(0),
+                Date      = r.GetFieldValue<DateOnly>(1).ToString("yyyy-MM-dd"),
+                Slot      = r.GetString(2),
+                Name      = r.GetString(3),
                 CreatedAt = r.GetFieldValue<DateTime>(4)
             });
         }
@@ -353,7 +366,7 @@ DELETE FROM bookings
         conn.Open();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "DELETE FROM bookings WHERE date < @mon OR date >= @next;";
-        cmd.Parameters.Add(new NpgsqlParameter("mon", NpgsqlDbType.Date) { Value = DateOnly.FromDateTime(mondayLocal) });
+        cmd.Parameters.Add(new NpgsqlParameter("mon",  NpgsqlDbType.Date) { Value = DateOnly.FromDateTime(mondayLocal) });
         cmd.Parameters.Add(new NpgsqlParameter("next", NpgsqlDbType.Date) { Value = DateOnly.FromDateTime(nextMondayLocal) });
         cmd.ExecuteNonQuery();
 
@@ -378,7 +391,7 @@ static class WeekHelper
         var now = TimeZoneInfo.ConvertTimeFromUtc(utcNow, TzTaipei);
         int diff = ((int)now.DayOfWeek - (int)DayOfWeek.Monday + 7) % 7;
         var mondayStart = now.Date.AddDays(-diff); // 本週一 00:00（台灣）
-        var nextMonday = mondayStart.AddDays(7);  // 下週一 00:00（台灣）
+        var nextMonday  = mondayStart.AddDays(7);  // 下週一 00:00（台灣）
         return (mondayStart, nextMonday);
     }
 
